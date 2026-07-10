@@ -1,28 +1,24 @@
 import streamlit as st
 import pandas as pd
-import joblib  # .pkl file load karne ke liye
+from predict import predict_output
 
-# --- CONFIGURATION & MODEL LOADING ---
+# City Tier Lists
+tier_1_cities = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune"]
+tier_2_cities = [
+    "Jaipur", "Chandigarh", "Indore", "Lucknow", "Patna", "Ranchi", "Visakhapatnam", "Coimbatore",
+    "Bhopal", "Nagpur", "Vadodara", "Surat", "Rajkot", "Jodhpur", "Raipur", "Amritsar", "Varanasi",
+    "Agra", "Dehradun", "Mysore", "Jabalpur", "Guwahati", "Thiruvananthapuram", "Ludhiana", "Nashik",
+    "Allahabad", "Udaipur", "Aurangabad", "Hubli", "Belgaum", "Salem", "Vijayawada", "Tiruchirappalli",
+    "Bhavnagar", "Gwalior", "Dhanbad", "Bareilly", "Aligarh", "Gaya", "Kozhikode", "Warangal",
+    "Kolhapur", "Bilaspur", "Jalandhar", "Noida", "Guntur", "Asansol", "Siliguri"
+]
+
 st.set_page_config(page_title="Insurance Predictor", layout="centered")
 
-@st.cache_resource
-def load_my_model():
-    # joblib se aapki trained model.pkl file directly load ho jayegi
-    try:
-        model = joblib.load("model.pkl")
-        return model
-    except Exception as e:
-        st.error(f"❌ Error loading model.pkl: {str(e)}")
-        return None
-
-# Model ko memory me load karein (st.cache_resource se ye baar-baar load nahi hoga)
-my_model = load_my_model()
-
-# --- FRONTEND UI ---
 st.title("Insurance Premium Category Predictor")
-st.markdown("Enter your details below to predict the premium category:")
+st.markdown("Enter your details below:")
 
-# Input fields (Aapke frontend ke mutabik)
+# --- FRONTEND INPUT FIELDS ---
 age = st.number_input("Age", min_value=1, max_value=119, value=30)
 weight = st.number_input("Weight (kg)", min_value=1.0, value=65.0)
 height = st.number_input("Height (m)", min_value=0.5, max_value=2.5, value=1.7)
@@ -36,51 +32,62 @@ occupation = st.selectbox(
 
 # --- PREDICTION LOGIC ---
 if st.button("Predict Premium Category"):
-    if my_model is None:
-        st.error("Model is not loaded. Please check your model.pkl file.")
-    else:
-        with st.spinner("Processing data and predicting..."):
-            try:
-                # 1. Feature Engineering / Preprocessing (Same as your model's expected inputs)
-                bmi = weight / (height ** 2)
-                
-                if age < 25:
-                    age_group = "Youth"
-                elif age < 60:
-                    age_group = "Adult"
-                else:
-                    age_group = "Senior"
-                    
-                city_tier = "Tier 1" if city.lower() in ['mumbai', 'delhi', 'bangalore', 'kolkata'] else "Tier 2"
-                lifestyle_risk = "High" if smoker else "Low"
-                
-                # 2. Creating DataFrame matching your model's exact feature names and structure
-                # Note: Make sure columns order matches exactly how your model was trained!
-                input_df = pd.DataFrame([{
-                    'bmi': bmi,
-                    'age_group': age_group,
-                    'lifestyle_risk': lifestyle_risk,
-                    'city_tier': city_tier,
-                    'income_lpa': income_lpa,
-                    'occupation': occupation
-                }])
-                
-                # 3. Model Prediction
-                # Agar aapka model direct classification output deta hai:
-                prediction = my_model.predict(input_df)[0]
-                
-                # Display Result
-                st.success(f"Predicted Insurance Premium Category: **{prediction}**")
-                
-                # Optional: Agar aapka model probabilities support karta hai (predict_proba)
-                if hasattr(my_model, "predict_proba"):
-                    probabilities = my_model.predict_proba(input_df)[0]
-                    st.write("📊 Class Probabilities:")
-                    # Display probabilities in a nice dictionary layout
-                    classes = my_model.classes_
-                    prob_dict = {str(c): f"{p*100:.2f}%" for c, p in zip(classes, probabilities)}
-                    st.json(prob_dict)
-                
-            except Exception as e:
-                st.error(f"❌ Prediction failed: {str(e)}")
-                st.info("Tip: Double-check if the input features and categorical values match your training data.")
+    with st.spinner("Processing data and generating prediction..."):
+        try:
+            # 1. City Normalization
+            normalized_city = city.strip().title()
+
+            # 2. BMI Calculation
+            bmi = weight / (height ** 2)
+
+            # 3. Lifestyle Risk Logic (Exact match - LOWERCASE)
+            if smoker and bmi > 30:
+                lifestyle_risk = "high"
+            elif smoker or bmi > 27:
+                lifestyle_risk = "medium"
+            else:
+                lifestyle_risk = "low"
+
+            # 4. Age Group Logic (CRITICAL FIX: Exact match with user_input.py - LOWERCASE)
+            if age < 25:
+                age_group = "young"
+            elif age < 45:
+                age_group = "adult"
+            elif age < 60:
+                age_group = "middle_aged"
+            else:
+                age_group = "senior"
+
+            # 5. City Tier Logic
+            if normalized_city in tier_1_cities:
+                city_tier = 1
+            elif normalized_city in tier_2_cities:
+                city_tier = 2
+            else:
+                city_tier = 3
+
+            # 6. Final Dictionary matching the model's exact features
+            user_input = {
+                'bmi': bmi,
+                'age_group': age_group,
+                'lifestyle_risk': lifestyle_risk,
+                'city_tier': city_tier,
+                'income_lpa': income_lpa,
+                'occupation': occupation
+            }
+
+            # 7. Model Prediction
+            result = predict_output(user_input)
+
+            # --- DISPLAY RESULTS ---
+            st.success(f"Predicted Insurance Premium Category: **{result['predicted_class']}**")
+            st.write(f"🔍 **Confidence:** {result['confidence'] * 100:.2f}%")
+            
+            st.write("📊 **Class Probabilities:**")
+            formatted_probs = {k: f"{v * 100:.2f}%" for k, v in result['class_probabilities'].items()}
+            st.json(formatted_probs)
+
+        except FileNotFoundError:
+            st.error("❌ `model.pkl` file nahi mili! Make sure it is inside a folder named `model` (e.g., `model/model.pkl`).")
+        except Exception as e:
+            st.error(f"❌ Prediction failed: {str(e)}")
